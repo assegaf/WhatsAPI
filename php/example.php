@@ -1,6 +1,19 @@
 <?php
 require "whatsapp.class.php";
- 
+
+
+$myPhoneNumber="628979993336";
+$password="9941db9342682b3f9b46e59a14de79d7";
+
+// DEMO OF USAGE
+$wa = new WhatsApp($myPhoneNumber, $password, "Din");
+$wa->Connect();
+$wa->Login();
+
+
+$wa->Message(time()."-1","622144212088","Hi There"); 
+
+/*
 // DEMO OF USAGE
 $wa = new WhatsApp("full number without + or 00", "password", "John Doe");
 $wa->Connect();
@@ -23,4 +36,9 @@ function parsEmo($matches){
 $bbcode = preg_replace_callback("#\[emo\](.+)\[\/emo\]#iUs","parsEmo",$str);
 $wa->Message(time()."-1","97366666666","$bbcode");
  //$wa->RequestLastSeen("9733110772"); 
+  * 
+  * 
+ */
+
+
 ?>

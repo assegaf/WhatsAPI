@@ -11,7 +11,7 @@ require "decode.php";
 	private $_Qop = 'auth';
 	private $_contype = 'STREAM_CLIENT_PERSISTENT';
     private $_device = "iPhone";
-    private $_whatsAppVer = "2.8.2";
+    private $_whatsAppVer = "2.8.1";
     private $_port = 5222;
 	/*
 	Account Info
@@ -76,32 +76,47 @@ require "decode.php";
 	}
 	
 	function send($data){
+		
+		echo "\n send ".str2hex($data);
 		socket_send( $this->_socket, $data, strlen($data), 0 );
+		echo " ... done \n";
 	}	
 	
 	function read(){
 		$buff = $this->_incomplete_message . socket_read( $this->_socket, 1024 );
+		
+		echo "\n read ".str2hex($buff)." [".$buff."] \n";
+		
+		
 		$this->_incomplete_message = "";
 		$resarray = explode("\x00", $buff);
 		$removed  = array_shift($resarray);	
 		$rescount = count($resarray);
 		if ($rescount != 0){
 			foreach($resarray as $k=>$v){
+				
 				$rcvd_type = $this->_identify($v);
+				
+				echo "\n \t found rcvd_type [".$rcvd_type."] ";
+				
 				if ($rcvd_type == 'incomplete_msg'){
 					$this->_incomplete_message = $v;
 				}
-				else if($rcvd_type == 'msg'){
+				else if($rcvd_type == 'msg') {
 					$msg = $this->parse_received_message($v);
 					echo json_encode($msg); // Do something with the message here ?
 				}
 				else if ($rcvd_type == 'account_info'){
 					$accinfo = $this->parse_account_info($v);
 					$this->accinfo = $accinfo;
+					print_r($this->accinfo);
 				}
 				else if ($rcvd_type == 'last_seen'){
 					$lastseen = $this->parse_last_seen($v);
 					echo json_encode($lastseen); // They're stored in account variables too 
+				} else {
+					
+					echo "\n \t unknown rcvd_type is unidentified [".strtohex($v)."] ";
 				}
 			}
 		unset($rcvd_type);
@@ -210,8 +225,10 @@ require "decode.php";
 	}
 	
 	function Login(){
+		
 		$Data = "WA"."\x01\x00\x00\x19\xf8\x05\x01\xa0\x8a\x84\xfc\x11"."$this->_device-$this->_whatsAppVer-$this->_port".
 				"\x00\x08\xf8\x02\x96\xf8\x01\xf8\x01\x7e\x00\x07\xf8\x05\x0f\x5a\x2a\xbd\xa7";
+		
 		$this->send($Data);
 		$Buffer = $this->read();
 		$Response = base64_decode(substr( $Buffer, 26 ));
@@ -225,13 +242,54 @@ require "decode.php";
 		$Response = "\x01\x31\xf8\x04\x86\xbd\xa7\xfd\x00\x01\x28".base64_encode($ResData);
 		$this->send($Response);
 		$rBuffer = $this->read();
-		$this->read();
+		
+		
+		$authData=base64_encode($ResData);
+		$authLen=strlen($authData);
+		$wholeLen=$authLen+9;
+		$wholeLen=chr($wholeLen>>8).chr($wholeLen&0xff);
+		$authLen=chr($authLen>>8).chr($authLen&0xff);
+		$Response = $wholeLen."\xf8\x04\x86\xbd\xa7\xfd\x00".$authLen.$authData;
+		
+		echo "\n[RESPONSE ".time()." ] Send Response ..  ".str2hex($Response);
+		$this->send($Response);
+		
+		
+		// $this->read();
+		
+		
 		$name = $this->_nickname;
 		$next = "\x00".chr(8+strlen($name))."\xf8\x05\x74\xa2\xa3\x61\xfc".chr(strlen($name)).$name.
 				"\x00\x15\xf8\x06\x48\x43\x05\xa2\x3a\xf8\x01\xf8\x04\x7b\xbd\x4d\xf8\x01\xf8\x03\x55\x61\x24".
 				"\x00\x12\xf8\x08\x48\x43\xfc\x01\x32\xa2\x3a\xa0\x8a\xf8\x01\xf8\x03\x1f\xbd\xb1";
 		$stream = $this->send($next);
 		$this->read();
+	}
+	
+	
+	public function _authenticate_old( $nonce, $_NC = '00000001')
+	{
+		$cnonce = random_uuid();
+		$a1 = sprintf('%s:%s:%s', $this ->_number, $this ->_server, $this ->_password);
+		if (true) {
+			$a1 = pack('H32', md5($a1) ) . ':' . $nonce . ':' . $cnonce;
+		}
+	
+		$a2 = "AUTHENTICATE:" . $this->_Digest_Uri;
+		$password = md5($a1) . ':' . $nonce . ':' . $_NC . ':' . $cnonce . ':' . $this->_Qop . ':' .md5($a2);
+	
+		$password = md5($password);
+	
+	
+		//$Response = sprintf('realm="s.whatsapp.net",response='.$password.',nonce="'.$nonce.'",digest-uri="xmpp/s.whatsapp.net",cnonce="'.$cnonce.'", qop=auth,username="'.$this->_number.'",nc=00000001,charset=utf-8');
+	
+	
+		$Response = sprintf('username="%s",realm="%s",nonce="%s",cnonce="%s",nc=%s,qop=%s,digest-uri="%s",response=%s,charset=utf-8',
+				// $Response = sprintf('username="%s",realm="%s",nonce="%s",cnonce="%s",nc=%s,qop=%s,digest-uri="%s",response=%s',
+				$this -> _number, $this->_Realm, $nonce, $cnonce, $_NC, $this->_Qop, $this->_Digest_Uri, $password);
+	
+	
+		return $Response;
 	}
 	
 	public function _authenticate( $nonce,$_NC = '00000001'){
@@ -260,7 +318,8 @@ require "decode.php";
 		$this->send($msg);
 	}
 
-	public function Message($msgid,$to,$txt){
+	public function Message($msgid,$to,$txt) {
+		
 		$long_txt_bool = isShort($txt);
 		$txt_length = hex2str(_hex(strlen($txt)));
 		$to_length = chr(mb_strlen($to,"UTF-8"));
@@ -270,22 +329,38 @@ require "decode.php";
 		$content .= "\x8A\xA2\x1B\x43\xFC$msgid_length";
 		$content .= $msgid;
 		$content .= "\xF8\x02\xF8\x04\xBA\xBD\x4F\xF8\x01\xF8\x01\x8C\xF8\x02\x16";
+		
 		if(!$long_txt_bool){
-		$content .= "\xFD\x00$txt_length";
+			$content .= "\xFD\x00$txt_length";
 		} else { 
-		$content .= "\xFC$txt_length";
+			$content .= "\xFC$txt_length";
 		}
+		
 		$content .= $txt;
 		$total_length = hex2str(_hex(strlen($content)));
 		if(strlen($total_length) == '1'){		$total_length = "\x00$total_length";		}
-		$msg ="";
+		$msg  = "";
 		$msg .= "$total_length";
 		$msg .= $content;
+		
 		//echo str2hex($msg);
+		
+		echo "\n Message() Sending ".str2hex($msg);
 		$stream = $this->send($msg);
+		echo "\n Message() Sending  is DONE stream[".$stream."]";
+		
+		echo "\n Message() Read #1 ";
 		$this->read();
+		echo "\n Message() Read #1 Done ";
+		
+		echo "\n Message() Read #2 ";
 		$this->read();
+		echo "\n Message() Read #2 Done ";
+		
+		echo "\n Message() Read #3 ";
 		$this->read();
+		echo "\n Message() Read #3 Done";
+		
 	}
 	
 	public function sendImage($msgid,$to,$path,$size,$link,$b64thumb){
